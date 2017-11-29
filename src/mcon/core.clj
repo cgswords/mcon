@@ -9,18 +9,35 @@
 ;; Check Definition                                            ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defrecord Blame [server client contract])
+
+(def blm (Blame. "server" "client" "contract"))
+
+(defn string-blame
+   [blame]
+   (str "[" (:server blame) "," (:client blame) "," (:contract blame) "]"))
+
+(defn invert-blame
+  [blame]
+  (Blame. (:client blame) (:server blame) (:contract blame)))
+
+(defn indy-blame
+  [blame]
+  (Blame. (:client blame) (:contract blame) (:contract blame)))
+
 (defrecord Strategy [sname impl])
 
 (defrecord Metastrat [sname impl substrat])
 
 (defn mon-flat
-  [strat contract dval]
+  [strat contract dval blame]
   (cond
     (instance? Strategy strat) 
-      ((:impl strat) contract dval)
+      ((:impl strat) contract dval blame)
     :else (Exception. (str "Invalid strategy: " strat "\n"
                            "  contract: " contract "\n"
-                           "  input:" dval "\n"))))
+                           "  input:" dval "\n"
+                           "Blame: " (string-blame blame)))))
 
 (defn mon-meta
   [strat contract dval blame]
@@ -28,21 +45,18 @@
   (if debug (println blame))
   (cond
     (instance? Metastrat strat) 
-      ((:impl strat) contract dval (:substrat strat))
+      ((:impl strat) contract dval (:substrat strat) blame)
     (instance? Strategy strat)  
-      (mon-flat strat contract dval)
+      (mon-flat strat contract dval blame)
     :else (Exception. (str "Invalid strategy: " strat "\n"
                            "  contract: " contract "\n"
-                           "  input:" dval "\n"))))
- 
-;; (defmacro make-blame
-;;   [contract]
-;;   `(cons (-> ~contract var meta :name str) :server :client)) 
+                           "  input:" dval "\n"
+                           "Blame: " (string-blame blame)))))
  
 (defmacro mon
   "Check a contract with a specific strategy"
-  [strat contract value]
-  `(mon-meta ~strat ~contract (delay ~value) (list :server :client :contract)))
+  [strat contract value blame]
+  `(mon-meta ~strat ~contract (delay ~value) ~blame))
 
 (defn extract
   [exp] (if (or (delay? exp) (future? exp)) @exp exp))
@@ -53,47 +67,47 @@
 
 ; Skip Verification
 (defn skip-check
-  [contract dval]
+  [contract dval blame]
   @dval)
 
 (def skip  (Strategy. "skip" skip-check))
 
 ; Eager Verification
 (defn eager-check
-  [contract dval]
-  (contract @dval))
+  [contract dval blame]
+  (contract @dval blame))
 
 (def eager (Strategy. "eager" eager-check))
 
 ; Semi Verification
 (defn semi-check
-  [contract dval]
-  (delay (contract @dval)))
+  [contract dval blame]
+  (delay (contract @dval blame)))
 
 (def semi  (Strategy. "semi-eager" semi-check))
 
 ; Prom Verification
 (defn future-check
-  [contract dval]
-  (future (contract @dval)))
+  [contract dval blame]
+  (future (contract @dval blame)))
 
 (def futur  (Strategy. "future" future-check))
 
 ; Conc Verification
 (defn conc-check
-  [contract dval]
-  (do (a/go (contract @dval)) @dval))
+  [contract dval blame]
+  (do (a/go (contract @dval blame)) @dval))
 
 (def conc (Strategy. "conc" conc-check))
 
 ; Spot-Checking Verification (functions only)
 (defn spot-check
   [generator]
-  (fn [contract dval]
+  (fn [contract dval blame]
     (let [f @dval]
       (if (not (fn? f)) 
           (throw (Exception. (str f " is not a function"))))
-      (let [c (contract f)]
+      (let [c (contract f blame)]
         (doall (map (fn [x] (c x)) (gen/sample generator 20)))
         f))))
 
@@ -102,14 +116,6 @@
   [g]
   (Strategy. "spot" (spot-check g)))
 
-;; (defn fconc-check
-;;   [contract dval strat]
-;;   ;; FIX ME 
-;;   (do (a/go (contract @dval)) @dval))
-;; 
-;; (def fconc (Strategy. "fconc" fconc-check nil))
-
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Metastrategy Definitions                                    ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -117,9 +123,10 @@
 ; With-Operator Verification
 (defn with-check
   [fun]
-  (fn [contract dval sub-strat]
-    (let [res (mon sub-strat contract @dval)]
-      (do (fun res)
+  (fn [contract dval sub-strat blame]
+    (let [val @dval
+          res (mon sub-strat contract val blame)]
+      (do (fun (mon sub-strat contract val (indy-blame blame)))
           res))))
 
 (defn with
@@ -130,10 +137,10 @@
 ; Random Verification
 (defn random-check
   [rate]
-  (fn [contract dval sub-strat]
+  (fn [contract dval sub-strat blame]
       (if debug (println (str "rand with " sub-strat)))
       (if (< (rand) rate) 
-          (mon sub-strat contract @dval) 
+          (mon sub-strat contract @dval blame) 
           @dval)))
 
 (defn random 
@@ -144,10 +151,11 @@
 ; Communicating Verification
 (defn comm-check
   [channel fun]
-  (fn [contract dval sub-strat]
+  (fn [contract dval sub-strat blame]
     (if debug (println sub-strat))
-    (let [res (mon sub-strat contract @dval)]
-    (do (a/put! channel (fun res))
+    (let [val @dval
+          res (mon sub-strat contract val blame)]
+    (do (a/put! channel (fun (mon sub-strat contract val (indy-blame blame))))
         res))))
 
 (defn comm
@@ -157,9 +165,9 @@
 
 ; Memoizing Verification
 (defn memo-check
-  [contract dval sub-strat]
+  [contract dval sub-strat blame]
     (if debug (println sub-strat))
-    (mon sub-strat (memoize contract) @dval))
+    (mon sub-strat (memoize contract) @dval blame))
 
 (defn memo 
   "memoizer meta-strategy, excepts a ref to a map and a strategy"
@@ -177,8 +185,8 @@
 
 (defn transition-check
   [state-ref from-state to-state]
-  (fn [contract dval sub-strat]
-    (let [res (mon sub-strat contract @dval)]
+  (fn [contract dval sub-strat blame]
+    (let [res (mon sub-strat contract @dval blame)]
       (if (in? (deref state-ref) from-state)
           (dosync (ref-set state-ref (if (list? to-state) to-state (list to-state)))
                   res)
@@ -194,8 +202,8 @@
 
 (defn transition-as-check
   [state-ref transition-fn]
-  (fn [contract dval sub-strat]
-    (let [res (mon sub-strat contract @dval)
+  (fn [contract dval sub-strat blame]
+    (let [res (mon sub-strat contract @dval blame)
           to-state (transition-fn (deref state-ref) res)]
       (if (not (= to-state :error))
           (dosync (ref-set state-ref (if (list? to-state) to-state (list to-state)))
@@ -222,12 +230,13 @@
 (defn predc
   "Build a predicate contract"
     [f]
-      (fn [x] 
+      (fn [x blame] 
         (if (f x) 
             x
             (throw (Exception. 
                      (str "Contract violation: " x 
-                          " violated " f))))))
+                          " violated " f "\n"
+                          "Blame: " (string-blame blame)))))))
 
 (def anyc (predc (fn [x] true)))
 
@@ -236,9 +245,9 @@
 (defn pairc
   "Build a predicate contract"
     [s c1 c2]
-    (fn [pair]
-        [(mon s c1 (first pair))
-         (mon s c2 (second pair))]))
+    (fn [pair blame]
+        [(mon s c1 (first pair) blame)
+         (mon s c2 (second pair) blame)]))
 
 (defn con-ravel
   [args ins]
@@ -250,7 +259,7 @@
 (defn func
   "Build a function contract"
   [& scs]
-  (fn [f]
+  (fn [f blame]
       (fn [& ins]
         (let [l  (* 2 (count ins))
               cl (count scs)]
@@ -260,6 +269,6 @@
                 posts    (drop l scs)]
             (mon (first posts) 
                  (second posts) 
-                 (apply f (map (fn [x] (mon (first x) (second x) (second (rest x))))
-                               mon-sets))))))))
-
+                 (apply f (map (fn [x] (mon (first x) (second x) (second (rest x)) (invert-blame blame)))
+                               mon-sets))
+                 blame))))))

@@ -6,14 +6,14 @@
 (defn treedc
   "Dependent tree contract combinator"
   [sleaf cleaf sval cval cleft cright srec]
-  (fn  [tree]
+  (fn  [tree blame]
     (if (nil? tree)
         (mon sleaf cleaf tree)
         (let [v (:val tree)]
           (BinTree.
-            (mon sval cval v)
-            (mon srec (cleft v) (:left tree))
-            (mon srec (cright v) (:right tree)))))))
+            (mon sval cval v blame)
+            (mon srec (cleft v) (:left tree) blame)
+            (mon srec (cright v) (:right tree) blame))))))
 
 (defn bst-range
   [lo hi]
