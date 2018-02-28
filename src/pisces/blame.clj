@@ -1,21 +1,13 @@
-(ns mcon.core
+(ns pisces.core
   (:require [clojure.core.async :as a :refer [go put!]])
   (:require [clojure.test.check.generators :as gen :refer [sample]])
   (:require [clojure.main :as m]))
-
-(def debug false)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Check Definition                                            ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord Blame [server client contract])
-
-(def blm (Blame. "server" "client" "contract"))
-
-(defn string-blame
-   [blame]
-   (str "[" (:server blame) "," (:client blame) "," (:contract blame) "]"))
 
 (defn invert-blame
   [blame]
@@ -37,7 +29,7 @@
     :else (Exception. (str "Invalid strategy: " strat "\n"
                            "  contract: " contract "\n"
                            "  input:" dval "\n"
-                           "Blame: " (string-blame blame)))))
+                           "Blame: " blame))))
 
 (defn mon-meta
   [strat contract dval blame]
@@ -51,12 +43,12 @@
     :else (Exception. (str "Invalid strategy: " strat "\n"
                            "  contract: " contract "\n"
                            "  input:" dval "\n"
-                           "Blame: " (string-blame blame)))))
+                           "Blame: " blame))))
  
 (defmacro mon
   "Check a contract with a specific strategy"
-  [strat contract value blame]
-  `(mon-meta ~strat ~contract (delay ~value) ~blame))
+  [strat contract value]
+  `(mon-meta ~strat ~contract (delay ~value) (list :server :client :contract)))
 
 (defn extract
   [exp] (if (or (delay? exp) (future? exp)) @exp exp))
@@ -236,7 +228,7 @@
             (throw (Exception. 
                      (str "Contract violation: " x 
                           " violated " f "\n"
-                          "Blame: " (string-blame blame)))))))
+                          "Blame: " blame))))))
 
 (def anyc (predc (fn [x] true)))
 
@@ -270,5 +262,4 @@
             (mon (first posts) 
                  (second posts) 
                  (apply f (map (fn [x] (mon (first x) (second x) (second (rest x)) (invert-blame blame)))
-                               mon-sets))
-                 blame))))))
+                               mon-sets))))))))

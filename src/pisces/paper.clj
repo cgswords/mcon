@@ -1,5 +1,5 @@
-(ns mcon.paper
-  (:require [mcon.core :refer :all])
+(ns pisces.paper
+  (:require [pisces.core :refer :all])
   (:require [clojure.test.check.generators :as gen :refer [nat]])
   (:require [clojure.core.async :as a :refer [go put! take!]]))
 

@@ -1,5 +1,5 @@
-(ns mcon.bst
-  (:require [mcon.core :refer :all]))
+(ns pisces.bst
+  (:require [pisces.core :refer :all]))
 
 (defrecord BinTree [val left right])
 
